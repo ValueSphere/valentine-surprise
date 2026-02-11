@@ -1,0 +1,65 @@
+name: Public Window Timer
+
+on:
+  schedule:
+    - cron: '0 * * * *' # Run every hour
+  workflow_dispatch: # Allow manual triggering for testing
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+jobs:
+  check-and-shutdown:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Check Time
+        id: check_time
+        run: |
+          TARGET_TIMESTAMP=1770904941 # 2026-02-12 ~15:02
+          CURRENT_TIMESTAMP=$(date +%s)
+          
+          echo "Target: $TARGET_TIMESTAMP"
+          echo "Current: $CURRENT_TIMESTAMP"
+          
+          if [ "$CURRENT_TIMESTAMP" -ge "$TARGET_TIMESTAMP" ]; then
+            echo "Time expired. Initiating shutdown."
+            echo "expired=true" >> $GITHUB_OUTPUT
+          else
+            echo "Time remaining: $(( ($TARGET_TIMESTAMP - $CURRENT_TIMESTAMP) / 3600 )) hours."
+            echo "expired=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Disable GitHub Pages
+        if: steps.check_time.outputs.expired == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Disabling GitHub Pages..."
+          # Attempt to disable Pages via API
+          gh api -X DELETE repos/${{ github.repository }}/pages || echo "Failed to disable Pages via API, proceeding to overwrite content."
+
+      - name: Overwrite Content and Push
+        if: steps.check_time.outputs.expired == 'true'
+        run: |
+          git config user.name "Valentine Timer Bot"
+          git config user.email "bot@users.noreply.github.com"
+          
+          # Overwrite index.html
+          echo "<html><head><title>Expired</title><style>body{background:black;color:pink;display:flex;justify-content:center;align-items:center;height:100vh;font-family:sans-serif;}</style></head><body><h1>This Valentine's surprise has closed. ✨</h1></body></html>" > index.html
+          
+          # Commit the "Kill Switch"
+          git add index.html
+          git commit -m "Public window expired - disabling site"
+          git push origin main
+
+      - name: Self-Destruct Workflow
+        if: steps.check_time.outputs.expired == 'true'
+        run: |
+          git rm .github/workflows/public-window-timer.yml
+          git commit -m "Remove timer workflow"
+          git push origin main
